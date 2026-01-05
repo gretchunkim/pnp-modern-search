@@ -91,7 +91,7 @@
     },
     "overrides": {
         "@xmldom/xmldom": "0.8.10",
-        "validator": "13.12.0",
+        "validator": "13.15.22",
         "loader-utils": "2.0.4",
         "node-fetch": "2.7.0",
         "autolinker": "3.16.2",
@@ -138,7 +138,7 @@
     "pnpm": {
         "overrides": {
             "@xmldom/xmldom": "0.8.10",
-            "validator": "13.12.0",
+            "validator": "13.15.22",
             "loader-utils": "2.0.4",
             "node-fetch": "2.7.0",
             "autolinker": "3.16.2",
