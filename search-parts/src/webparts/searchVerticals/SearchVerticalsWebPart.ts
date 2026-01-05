@@ -107,7 +107,7 @@ export default class DataVerticalsWebPart extends BaseWebPart<ISearchVerticalsWe
         const isInAudience = await this.isInAudience();
         if (!isInAudience) {
             this.domElement.innerHTML = '';
-            return;
+            return this.renderCompleted();
         }
 
         let renderRootElement: JSX.Element = null;
