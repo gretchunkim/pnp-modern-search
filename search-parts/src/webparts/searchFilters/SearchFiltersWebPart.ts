@@ -171,7 +171,7 @@ export default class SearchFiltersWebPart extends BaseWebPart<ISearchFiltersWebP
         const isInAudience = await this.isInAudience();
         if (!isInAudience) {
             this.domElement.innerHTML = '';
-            return;
+            return this.renderCompleted();
         }
 
         // Determine the template content to display

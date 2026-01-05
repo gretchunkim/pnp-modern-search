@@ -119,29 +119,9 @@ const envCheck = build.subTask('environmentCheck', (gulp, config, done) => {
                 }
             });
 
-            // Configure splitChunks to allow deduplication of moment.js across locale chunks
-            // while keeping adaptive-expressions and adaptivecards-templating together
-            generatedConfiguration.optimization.splitChunks = {
-                cacheGroups: {
-                    // Keep moment.js in a single chunk that locale chunks can reference
-                    moment: {
-                        test: /[\\/]node_modules[\\/]\.pnpm[\\/]moment@[^\\/]+[\\/]node_modules[\\/]moment[\\/](?!locale)/,
-                        name: 'moment-base',
-                        chunks: 'all',
-                        priority: 20,
-                        enforce: true
-                    },
-                    // Prevent splitting adaptive-expressions to avoid duplicate function registrations
-                    adaptiveCards: {
-                        test: /[\\/]node_modules[\\/].*[\\/](adaptive-expressions|adaptivecards|adaptivecards-templating)[\\/]/,
-                        name: 'adaptive-cards-shared',
-                        chunks: 'all',
-                        priority: 10,
-                        enforce: true
-                    },
-                    default: false
-                }
-            };
+            // Disable vendors cache group to prevent chunk splitting issues
+            // Do NOT use named cache groups as they create separate async chunks that cause race conditions
+            generatedConfiguration.optimization.splitChunks = { cacheGroups: { vendors: false } };
 
             // pack each moment.js locale individually to optimize bundle
             generatedConfiguration.plugins.push(
