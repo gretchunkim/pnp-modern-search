@@ -136,7 +136,7 @@ export default class SearchBoxWebPart extends BaseWebPart<ISearchBoxWebPartProps
         const isInAudience = await this.isInAudience();
         if (!isInAudience) {
             this.domElement.innerHTML = '';
-            return;
+            return this.renderCompleted();
         }
 
         try {
