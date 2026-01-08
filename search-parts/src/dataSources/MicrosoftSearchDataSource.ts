@@ -696,119 +696,122 @@ export class MicrosoftSearchDataSource extends BaseDataSource<IMicrosoftSearchDa
      */
     public async getItemsPreview(data: IDataSourceData, slots: { [key: string]: string }): Promise<IDataSourceData> 
     {
-
-        const validPreviewExt = DataSourceHelper.getValidPreviewExtensions();
         // Auto determined preview URL for Microsoft Search
-        if (slots[BuiltinTemplateSlots.PreviewUrl] === AutoCalculatedDataSourceFields.AutoPreviewUrl) 
-            {
-
-            data.items = data.items.map(item => {
-                // Check if resource.listItem.fields exists before accessing
-                if (!item.resource?.listItem?.fields) {
-                    return item;
-                }
-
-                const contentTypeId = item.resource.listItem.fields.contentTypeId;
-                const isContainer = DataSourceHelper.isContainerContentType(contentTypeId);
-
-                const webUrl = item.resource.listItem.fields.sitePath;
-                let pathProperty = item[slots[BuiltinTemplateSlots.Path]] || webUrl || item['DefaultEncodingURL'];
-
-                item.AutoPreviewUrl = DataSourceHelper.generatePreviewUrl({
-                    webUrl: webUrl,
-                    uniqueId: item.resource.listItem.id,
-                    fileType: item[slots[BuiltinTemplateSlots.FileType]] || item.resource.listItem.fields.filetype,
-                    pathProperty: pathProperty,
-                    isContainer: isContainer
-                });
-
-                return item;
-            });
+        if (slots[BuiltinTemplateSlots.PreviewUrl] === AutoCalculatedDataSourceFields.AutoPreviewUrl) {
+            data.items = data.items.map(item => this.generateItemPreviewUrl(item, slots));
         }
+        
         // Auto determined preview image URL (thumbnail)
         if (slots[BuiltinTemplateSlots.PreviewImageUrl] === AutoCalculatedDataSourceFields.AutoPreviewImageUrl) {
-
-            data.items = data.items.map(item => {
-
-                let contentClass = ObjectHelper.byPath(item, slots.ContentClass);
-
-                if (!isEmpty(contentClass) && (contentClass.toLocaleLowerCase() == "sts_site" || contentClass.toLocaleLowerCase() == "sts_web")) {
-                    item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl] = ObjectHelper.byPath(item, "SiteLogo");
-                }
-                else {
-                    const siteId = ObjectHelper.byPath(item, slots.SiteId);
-                    const webId = ObjectHelper.byPath(item, slots.WebId);
-                    const listId = ObjectHelper.byPath(item, slots.ListId);
-                    const itemId = ObjectHelper.byPath(item, slots.ItemId);
-
-                    const isFolder = ObjectHelper.byPath(item, slots.IsFolder);
-                    const isContainerType = DataSourceHelper.isContainerType(isFolder);
-
-                    // Try thumbnail URL first
-                    let thumbNailUrl = ObjectHelper.byPath(item, "PictureThumbnailURL");
-                    thumbNailUrl = DataSourceHelper.enhanceThumbnailUrl(thumbNailUrl);
-                    
-                    if (thumbNailUrl) {
-                        item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl] = thumbNailUrl;
-                    }
-                    else if (siteId && listId && itemId && !isContainerType) {
-                        // SharePoint item thumbnail - only for items that are actually files (have driveItem)
-                        const itemFileType = ObjectHelper.byPath(item, "resource.listItem.fields.filetype");
-                        const hasFile = ObjectHelper.byPath(item, "resource.listItem.fields.file");
-                        
-                        // Check contentClass to ensure it's a document, not just a list item
-                        const itemContentClass = ObjectHelper.byPath(item, "resource.fields.contentClass");
-                        const isDocument = !itemContentClass || 
-                                         itemContentClass.toLocaleLowerCase().indexOf("document") !== -1 ||
-                                         itemContentClass.toLocaleLowerCase() === "sts_listitem_documentlibrary";
-                        
-                        // Only attempt thumbnail generation for actual files (not list items without attachments)
-                        if (itemFileType && hasFile && isDocument && validPreviewExt.indexOf(itemFileType.toUpperCase()) !== -1) {
-                            // Check if required nested properties exist before accessing
-                            if (!item.resource?.webUrl || !item.resource?.listItem?.fields?.siteId || 
-                                !item.resource?.parentReference?.sharepointIds?.listId || 
-                                !item.resource?.parentReference?.sharepointIds?.listItemUniqueId) {
-                                return item;
-                            }
-                            
-                            // Extract base URL from resource.webUrl
-                            let tenantUrl = item.resource.webUrl.split('/sites/')[0];
-                            if (tenantUrl == null) {
-                                tenantUrl = item.resource.webUrl.split('/teams/')[0];
-                            }
-                            
-                            item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl] = DataSourceHelper.generateSharePointThumbnailUrl({
-                                baseUrl: tenantUrl,
-                                siteId: item.resource.listItem.fields.siteId,
-                                webId: webId,
-                                listId: item.resource.parentReference.sharepointIds.listId,
-                                itemId: item.resource.parentReference.sharepointIds.listItemUniqueId
-                            });
-                        }
-                    } else {
-                        // Graph items logic
-                        const driveId = ObjectHelper.byPath(item, slots[BuiltinTemplateSlots.DriveId]);
-                        if (driveId && siteId && itemId) {
-                            item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl] = DataSourceHelper.generateGraphThumbnailUrl({
-                                baseUrl: this.context.pageContext.site.absoluteUrl,
-                                siteId,
-                                driveId,
-                                itemId
-                            });
-                        }
-                    }
-                }
-
-                // Validate URL is from trusted domain
-                item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl] = DataSourceHelper.validatePreviewImageUrl(
-                    item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl]
-                );
-                
-                return item;
-            });
+            const validPreviewExt = DataSourceHelper.getValidPreviewExtensions();
+            data.items = data.items.map(item => this.generateItemThumbnailUrl(item, slots, validPreviewExt));
         }
 
         return data;
+    }
+
+    private generateItemPreviewUrl(item: any, slots: { [key: string]: string }): any {
+        // Check if resource.listItem.fields exists before accessing
+        if (!item.resource?.listItem?.fields) {
+            return item;
+        }
+
+        const contentTypeId = item.resource.listItem.fields.contentTypeId;
+        const isContainer = DataSourceHelper.isContainerContentType(contentTypeId);
+        const webUrl = item.resource.listItem.fields.sitePath;
+        const pathProperty = item[slots[BuiltinTemplateSlots.Path]] || webUrl || item['DefaultEncodingURL'];
+
+        item.AutoPreviewUrl = DataSourceHelper.generatePreviewUrl({
+            webUrl: webUrl,
+            uniqueId: item.resource.listItem.id,
+            fileType: item[slots[BuiltinTemplateSlots.FileType]] || item.resource.listItem.fields.filetype,
+            pathProperty: pathProperty,
+            isContainer: isContainer
+        });
+
+        return item;
+    }
+
+    private generateItemThumbnailUrl(item: any, slots: { [key: string]: string }, validPreviewExt: string[]): any {
+        const contentClass = ObjectHelper.byPath(item, slots.ContentClass);
+
+        if (!isEmpty(contentClass) && (contentClass.toLocaleLowerCase() === "sts_site" || contentClass.toLocaleLowerCase() === "sts_web")) {
+            item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl] = ObjectHelper.byPath(item, "SiteLogo");
+        } else {
+            this.generateThumbnailForNonSiteItem(item, slots, validPreviewExt);
+        }
+
+        // Validate URL is from trusted domain
+        item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl] = DataSourceHelper.validatePreviewImageUrl(
+            item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl]
+        );
+
+        return item;
+    }
+
+    private generateThumbnailForNonSiteItem(item: any, slots: { [key: string]: string }, validPreviewExt: string[]): void {
+        const siteId = ObjectHelper.byPath(item, slots.SiteId);
+        const webId = ObjectHelper.byPath(item, slots.WebId);
+        const listId = ObjectHelper.byPath(item, slots.ListId);
+        const itemId = ObjectHelper.byPath(item, slots.ItemId);
+        const isFolder = ObjectHelper.byPath(item, slots.IsFolder);
+        const isContainerType = DataSourceHelper.isContainerType(isFolder);
+
+        // Try thumbnail URL first
+        let thumbNailUrl = ObjectHelper.byPath(item, "PictureThumbnailURL");
+        thumbNailUrl = DataSourceHelper.enhanceThumbnailUrl(thumbNailUrl);
+
+        if (thumbNailUrl) {
+            item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl] = thumbNailUrl;
+        } else if (siteId && listId && itemId && !isContainerType) {
+            this.generateSharePointThumbnail(item, siteId, webId, listId, validPreviewExt);
+        } else {
+            this.generateGraphThumbnail(item, siteId, itemId, slots);
+        }
+    }
+
+    private generateSharePointThumbnail(item: any, siteId: string, webId: string, listId: string, validPreviewExt: string[]): void {
+        const itemFileType = ObjectHelper.byPath(item, "resource.listItem.fields.filetype");
+        const hasFile = ObjectHelper.byPath(item, "resource.listItem.fields.file");
+        const itemContentClass = ObjectHelper.byPath(item, "resource.fields.contentClass");
+        
+        const isDocument = !itemContentClass || 
+                         itemContentClass.toLocaleLowerCase().includes("document") ||
+                         itemContentClass.toLocaleLowerCase() === "sts_listitem_documentlibrary";
+
+        if (!itemFileType || !hasFile || !isDocument || !validPreviewExt.includes(itemFileType.toUpperCase())) {
+            return;
+        }
+
+        // Check if required nested properties exist
+        if (!item.resource?.webUrl || !item.resource?.listItem?.fields?.siteId || 
+            !item.resource?.parentReference?.sharepointIds?.listId || 
+            !item.resource?.parentReference?.sharepointIds?.listItemUniqueId) {
+            return;
+        }
+
+        // Extract base URL from resource.webUrl
+        const tenantUrl = item.resource.webUrl.split('/sites/')[0] || item.resource.webUrl.split('/teams/')[0];
+
+        item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl] = DataSourceHelper.generateSharePointThumbnailUrl({
+            baseUrl: tenantUrl,
+            siteId: item.resource.listItem.fields.siteId,
+            webId: webId,
+            listId: item.resource.parentReference.sharepointIds.listId,
+            itemId: item.resource.parentReference.sharepointIds.listItemUniqueId
+        });
+    }
+
+    private generateGraphThumbnail(item: any, siteId: string, itemId: string, slots: { [key: string]: string }): void {
+        const driveId = ObjectHelper.byPath(item, slots[BuiltinTemplateSlots.DriveId]);
+        if (driveId && siteId && itemId) {
+            item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl] = DataSourceHelper.generateGraphThumbnailUrl({
+                baseUrl: this.context.pageContext.site.absoluteUrl,
+                siteId,
+                driveId,
+                itemId
+            });
+        }
     }
 
     private initProperties(): void {
