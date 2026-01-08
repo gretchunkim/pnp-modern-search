@@ -613,7 +613,7 @@ export class MicrosoftSearchDataSource extends BaseDataSource<IMicrosoftSearchDa
         return [
             {
                 slotName: BuiltinTemplateSlots.Title,
-                slotField: 'resource.name'
+                slotField: 'title'
             },
             {
                 slotName: BuiltinTemplateSlots.Path,
@@ -625,7 +625,7 @@ export class MicrosoftSearchDataSource extends BaseDataSource<IMicrosoftSearchDa
             },
             {
                 slotName: BuiltinTemplateSlots.FileType,
-                slotField: 'resource.listItem.fields.filetype'
+                slotField: 'FileType'
             },
             {
                 slotName: BuiltinTemplateSlots.PreviewImageUrl,
@@ -677,11 +677,11 @@ export class MicrosoftSearchDataSource extends BaseDataSource<IMicrosoftSearchDa
             },
             {
                 slotName: 'SPWebURL',
-                slotField: 'resource.listItem.fields.sitePath'
+                slotField: 'sitePath'
             },
             {
                 slotName: 'SiteTitle',
-                slotField: 'resource.listItem.fields.siteTitle'
+                slotField: 'siteTitle'
             },
         ];
     }
@@ -703,6 +703,11 @@ export class MicrosoftSearchDataSource extends BaseDataSource<IMicrosoftSearchDa
             {
 
             data.items = data.items.map(item => {
+                // Check if resource.listItem.fields exists before accessing
+                if (!item.resource?.listItem?.fields) {
+                    return item;
+                }
+
                 const contentTypeId = item.resource.listItem.fields.contentTypeId;
                 const isContainer = DataSourceHelper.isContainerContentType(contentTypeId);
 
@@ -747,10 +752,25 @@ export class MicrosoftSearchDataSource extends BaseDataSource<IMicrosoftSearchDa
                         item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl] = thumbNailUrl;
                     }
                     else if (siteId && listId && itemId && !isContainerType) {
-                        // SharePoint item thumbnail
+                        // SharePoint item thumbnail - only for items that are actually files (have driveItem)
                         const itemFileType = ObjectHelper.byPath(item, "resource.listItem.fields.filetype");
+                        const hasFile = ObjectHelper.byPath(item, "resource.listItem.fields.file");
                         
-                        if (itemFileType && validPreviewExt.indexOf(itemFileType.toUpperCase()) !== -1) {
+                        // Check contentClass to ensure it's a document, not just a list item
+                        const itemContentClass = ObjectHelper.byPath(item, "resource.fields.contentClass");
+                        const isDocument = !itemContentClass || 
+                                         itemContentClass.toLocaleLowerCase().indexOf("document") !== -1 ||
+                                         itemContentClass.toLocaleLowerCase() === "sts_listitem_documentlibrary";
+                        
+                        // Only attempt thumbnail generation for actual files (not list items without attachments)
+                        if (itemFileType && hasFile && isDocument && validPreviewExt.indexOf(itemFileType.toUpperCase()) !== -1) {
+                            // Check if required nested properties exist before accessing
+                            if (!item.resource?.webUrl || !item.resource?.listItem?.fields?.siteId || 
+                                !item.resource?.parentReference?.sharepointIds?.listId || 
+                                !item.resource?.parentReference?.sharepointIds?.listItemUniqueId) {
+                                return item;
+                            }
+                            
                             // Extract base URL from resource.webUrl
                             let tenantUrl = item.resource.webUrl.split('/sites/')[0];
                             if (tenantUrl == null) {
@@ -794,7 +814,7 @@ export class MicrosoftSearchDataSource extends BaseDataSource<IMicrosoftSearchDa
     private initProperties(): void {
         this.properties.entityTypes = this.properties.entityTypes !== undefined ? this.properties.entityTypes : [EntityType.DriveItem];
 
-    const CommonFields = ["name", "webUrl", "filetype", "createdBy", "createdDateTime", "lastModifiedDateTime", "parentReference", "size", "description", "file", "folder", "subject", "bodyPreview", "replyTo", "from", "sender", "start", "end", "displayName", "givenName", "surname", "userPrincipalName", "mail", "phones", "department","contentTypeId","siteId", "webId", "contentClass", "siteTitle", "sitePath", "AuthorOWSUSER", "listId", "listItemId", "listItemUniqueId", "driveId"];
+    const CommonFields = ["title", "name", "webUrl", "filetype", "fileType", "createdBy", "createdDateTime", "lastModifiedDateTime", "parentReference", "size", "description", "file", "folder", "subject", "bodyPreview", "replyTo", "from", "sender", "start", "end", "displayName", "givenName", "surname", "userPrincipalName", "mail", "phones", "department","contentTypeId","siteId", "webId", "contentClass", "siteTitle", "sitePath", "AuthorOWSUSER", "listId", "listItemId", "listItemUniqueId", "driveId", "owstaxidmetadataalltagsinfo"];
 
         this.properties.fields = this.properties.fields !== undefined ? this.properties.fields : CommonFields;
         this.properties.sortProperties = this.properties.sortProperties !== undefined ? this.properties.sortProperties : [];
@@ -1073,6 +1093,14 @@ export class MicrosoftSearchDataSource extends BaseDataSource<IMicrosoftSearchDa
                             if (propertiesFieldName) {
                                 Object.keys(hit.resource[propertiesFieldName]).forEach(field => {
                                     hit[field] = hit.resource[propertiesFieldName][field];
+                                });
+                            }
+
+                            // Also flatten listItem.fields for driveItem entities backed by SharePoint
+                            const resourceAny = (hit.resource as any);
+                            if (resourceAny.listItem?.fields) {
+                                Object.keys(resourceAny.listItem.fields).forEach(field => {
+                                    hit[field] = resourceAny.listItem.fields[field];
                                 });
                             }
 
