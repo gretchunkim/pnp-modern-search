@@ -32,7 +32,7 @@ export abstract class BaseWebComponent extends HTMLElement {
     protected abstract connectedCallback(): void;
         
     protected disconnectedCallback() {
-        // eslint-disable-next-line @microsoft/spfx/pair-react-dom-render-unmount
+        // eslint-disable-next-line @rushstack/pair-react-dom-render-unmount -- render is called in subclass connectedCallback implementations
         ReactDOM.unmountComponentAtNode(this);
     }
     
