@@ -61,7 +61,8 @@
     },
     "repository": {
         "type": "git",
-        "url": "https://github.com/microsoft-search/pnp-modern-search/tree/main/search-extensibility"
+        "url": "git+https://github.com/microsoft-search/pnp-modern-search.git",
+        "directory": "search-extensibility"
     },
     "license": "MIT",
     "keywords": [
