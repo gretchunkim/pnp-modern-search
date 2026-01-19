@@ -417,6 +417,7 @@ define([], function () {
                 CacheDurationLabel: "Cacheduur (uren)",
                 CacheDurationDescription: "Duur in uren voor het cachen van doelgroeplidmaatschap"
             },
+            TitleFontDefault: "standaard",
             TitleStylingGroupName: "Webonderdeel titelopmaak",
             TitleFont: "Titellettertype",
             TitleFontSize: "Titellettertypegrootte (px)",
