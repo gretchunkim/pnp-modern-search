@@ -3,7 +3,7 @@ import * as ReactDOM from "react-dom";
 import { BaseWebComponent } from "@pnp/modern-search-extensibility";
 import { ActionButton, IIconProps, ITheme } from "@fluentui/react";
 import { ISearchResultsTemplateContext } from "../models/common/ITemplateContext";
-import { HttpClient, HttpClientResponse, IHttpClientOptions, ISPHttpClientOptions, SPHttpClient, SPHttpClientResponse } from "@microsoft/sp-http";
+import { AadTokenProviderFactory, HttpClient, HttpClientResponse, IHttpClientOptions, ISPHttpClientOptions, SPHttpClient, SPHttpClientResponse } from "@microsoft/sp-http";
 import { Guid, Log } from "@microsoft/sp-core-library";
 import { IReadonlyTheme } from "@microsoft/sp-component-base";
 import * as strings from "CommonStrings";
@@ -191,29 +191,26 @@ export class DownloadSelectedItemsButtonComponent extends React.Component<IExpor
         const files = responses.map(response => {
           return {name: response["ListData"]["Row"][0]["FileLeafRef"], size: parseInt((response["ListData"]["Row"][0]["File_x0020_Size"] || "").trim(), 10), docId: `${response["ListData"]["Row"][0][".spItemUrl"]}&${response["ListSchema"][".driveAccessToken"]}`, isFolder: response["ListData"]["Row"][0]["FSObjType"] === "1" ? true : false};
         });
-        const spOptions1: ISPHttpClientOptions = {
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            "resource":`${responses[0]["ListSchema"][".mediaBaseUrl"]}`
+        
+        const mediaBaseUrl = responses[0]["ListSchema"][".mediaBaseUrl"];
+        const callerStack = responses[0]["ListSchema"][".callerStack"];
+
+        const filename = `OneDrive_1_${new Date().toLocaleDateString().replace(/\//g, "-")}.zip`;
+
+        this.props.webPartContext.aadTokenProviderFactory.getTokenProvider()
+          .then((tokenProvider: any) => {
+            // Returns an AAD JWT (eyJ...) with audience = mediaBaseUrl
+            return tokenProvider.getToken(mediaBaseUrl);
           })
-        };
-
-        const filename = `OneDrive_1_${new Date().toLocaleDateString().replace("/", "-")}.zip`;
-
-        this.props.webPartContext.spHttpClient.post(`${this.props.context.context.web.absoluteUrl}/_api/SP.OAuth.Token/Acquire()`, SPHttpClient.configurations.v1, spOptions1)
-          .then((response: SPHttpClientResponse) => {
-            return response.json()
-          }).then((response: any) => {
-            const token = response["access_token"];
+          .then((mediapToken: string) => {
             const downloadParameters = {
-              files: `${JSON.stringify({items: files})}`,
-              guid: Guid.newGuid(),
-              oAuthToken: token,
+              files: `${JSON.stringify({ items: files })}`,
+              guid: Guid.newGuid().toString(),
+              oAuthToken: mediapToken,
               provider: "spo",
               zipFileName: filename
             };
+
             const downloadOptions: IHttpClientOptions = {
               headers: {
                 "Content-Type": "application/x-www-form-urlencoded"
@@ -221,28 +218,33 @@ export class DownloadSelectedItemsButtonComponent extends React.Component<IExpor
               body: this._encodeFormData(downloadParameters)
             };
 
-            this.props.webPartContext.httpClient.post(`${responses[0]["ListSchema"][".mediaBaseUrl"]}/transform/zip?cs=${responses[0]["ListSchema"][".callerStack"]}`, HttpClient.configurations.v1, downloadOptions)
-              .then((response: HttpClientResponse) => {
-                if (response.ok) {
-                  return response.blob();
-                }
-                else {
-                  throw new Error(response.statusText);
-                  }
-              })
-              .then((blob: Blob) => {
-                const url = window.URL.createObjectURL(blob);
-          
-                const anchor = document.createElement("a");
-                anchor.href = url;
-                anchor.download = filename;
-                anchor.click();
-          
-                window.URL.revokeObjectURL(url);
-              })
-              .catch((error: any) => {
-                Log.error("DownloadSelectedItemsButtonComponent", new Error(`Error when downloading files. Details ${error}`));
-              });
+            return this.props.webPartContext.httpClient.post(
+              `${mediaBaseUrl}/transform/zip?cs=${callerStack}`,
+              HttpClient.configurations.v1,
+              downloadOptions
+            );
+          })
+          .then((response: HttpClientResponse) => {
+            if (response.ok) {
+              return response.blob();
+            }
+            throw new Error(response.statusText);
+          })
+          .then((blob: Blob) => {
+            const url = window.URL.createObjectURL(blob);
+
+            const anchor = document.createElement("a");
+            anchor.href = url;
+            anchor.download = filename;
+            anchor.click();
+
+            window.URL.revokeObjectURL(url);
+          })
+          .catch((error: any) => {
+            Log.error("DownloadSelectedItemsButtonComponent", new Error(`Error when downloading files. Details ${error}`));
+          })
+          .finally(() => {
+            this.setState({ exporting: false });
           });
       });
     }
