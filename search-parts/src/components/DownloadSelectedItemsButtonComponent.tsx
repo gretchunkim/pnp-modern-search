@@ -197,11 +197,20 @@ export class DownloadSelectedItemsButtonComponent extends React.Component<IExpor
 
         const filename = `OneDrive_1_${new Date().toLocaleDateString().replace(/\//g, "-")}.zip`;
 
-        this.props.webPartContext.aadTokenProviderFactory.getTokenProvider()
+        const wpContext = this.props.webPartContext ?? this.props.context?.context;
+
+        if (!wpContext?.aadTokenProviderFactory?.getTokenProvider) {
+          throw new Error(
+            "PnP Modern Search: aadTokenProviderFactory is not available. Ensure a valid SPFx WebPartContext is passed (webPartContext or template context)."
+          );
+        }
+
+        wpContext.aadTokenProviderFactory.getTokenProvider()
           .then((tokenProvider: any) => {
             // Returns an AAD JWT (eyJ...) with audience = mediaBaseUrl
             return tokenProvider.getToken(mediaBaseUrl);
           })
+
           .then((mediapToken: string) => {
             const downloadParameters = {
               files: `${JSON.stringify({ items: files })}`,
