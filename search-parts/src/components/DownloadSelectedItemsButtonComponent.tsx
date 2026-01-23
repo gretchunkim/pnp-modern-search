@@ -384,7 +384,8 @@ export class DownloadSelectedItemsButtonWebComponent extends BaseWebComponent {
 
       props.webPartContext = {}
       props.webPartContext.spHttpClient = this._serviceScope.consume(SPHttpClient.serviceKey);
-      props.webPartContext.httpClient = this._serviceScope.consume(HttpClient.serviceKey);  
+      props.webPartContext.httpClient = this._serviceScope.consume(HttpClient.serviceKey);
+      props.webPartContext.aadTokenProviderFactory = this._serviceScope.consume(AadTokenProviderFactory.serviceKey);
 
       const exportButtonComponent = <DownloadSelectedItemsButtonComponent {...props} />;
       ReactDOM.render(exportButtonComponent, this);
