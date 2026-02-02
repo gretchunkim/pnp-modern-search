@@ -678,7 +678,18 @@ export default class SearchFiltersWebPart extends BaseWebPart<ISearchFiltersWebP
                 }
             });
 
-            availableFieldOptionsFromResults = uniq(allAvailableFieldsFromResults).map(field => { return { key: field, text: field }; });
+            availableFieldOptionsFromResults = uniq(allAvailableFieldsFromResults).map(field => { 
+                // Trim common prefixes to make field names cleaner for filtering
+                let cleanFieldName = field;
+                if (field.startsWith('resource.fields.')) {
+                    cleanFieldName = field.replace('resource.fields.', '');
+                } else if (field.startsWith('resource.listItem.fields.')) {
+                    cleanFieldName = field.replace('resource.listItem.fields.', '');
+                } else if (field.startsWith('resource.')) {
+                    cleanFieldName = field.replace('resource.', '');
+                }
+                return { key: cleanFieldName, text: cleanFieldName }; 
+            });
         }
 
         if (availableFieldOptionsFromResults.length > 0) {

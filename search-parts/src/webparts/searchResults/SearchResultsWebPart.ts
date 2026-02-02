@@ -404,6 +404,12 @@ export default class SearchResultsWebPart extends BaseWebPart<ISearchResultsWebP
         let renderRootElement: JSX.Element = null;
         let renderDataContainer: JSX.Element = null;
 
+        // Check if instanceId is defined - it might not be initialized yet during early render cycles
+        if (!this.instanceId) {
+            Log.verbose(`[SearchResultsWebPart.renderCompleted]`, `instanceId is not yet initialized, skipping render`, this.context?.serviceScope);
+            return;
+        }
+
         if (this.dataSource && this.instanceId) {
 
             // The main content WP logic
