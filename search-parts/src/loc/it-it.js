@@ -419,6 +419,7 @@ define([], function () {
                 CacheDurationLabel: "Durata cache (ore)",
                 CacheDurationDescription: "Durata in ore per la memorizzazione nella cache delle informazioni sull'appartenenza al pubblico"
             },
+            TitleFontDefault: "predefinito",
             TitleStylingGroupName: "Stile del titolo della web part",
             TitleFont: "Carattere del titolo",
             TitleFontSize: "Dimensione carattere del titolo (px)",

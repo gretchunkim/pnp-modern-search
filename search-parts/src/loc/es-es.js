@@ -418,6 +418,7 @@ define([], function () {
                 CacheDurationLabel: "Duración de caché (horas)",
                 CacheDurationDescription: "Duración en horas para almacenar en caché la información de pertenencia a la audiencia"
             },
+            TitleFontDefault: "predeterminado",
             TitleStylingGroupName: "Estilo del título del elemento web",
             TitleFont: "Fuente del título",
             TitleFontSize: "Tamaño de fuente del título (px)",

@@ -729,7 +729,7 @@ export class MicrosoftSearchDataSource extends BaseDataSource<IMicrosoftSearchDa
         return [
             {
                 slotName: BuiltinTemplateSlots.Title,
-                slotField: 'resource.name'
+                slotField: 'title'
             },
             {
                 slotName: BuiltinTemplateSlots.Path,
@@ -741,7 +741,7 @@ export class MicrosoftSearchDataSource extends BaseDataSource<IMicrosoftSearchDa
             },
             {
                 slotName: BuiltinTemplateSlots.FileType,
-                slotField: 'resource.listItem.fields.filetype'
+                slotField: 'FileType'
             },
             {
                 slotName: BuiltinTemplateSlots.PreviewImageUrl,
@@ -793,11 +793,11 @@ export class MicrosoftSearchDataSource extends BaseDataSource<IMicrosoftSearchDa
             },
             {
                 slotName: 'SPWebURL',
-                slotField: 'resource.listItem.fields.sitePath'
+                slotField: 'sitePath'
             },
             {
                 slotName: 'SiteTitle',
-                slotField: 'resource.listItem.fields.siteTitle'
+                slotField: 'siteTitle'
             },
         ];
     }
@@ -812,11 +812,16 @@ export class MicrosoftSearchDataSource extends BaseDataSource<IMicrosoftSearchDa
      */
     public async getItemsPreview(data: IDataSourceData, slots: { [key: string]: string }): Promise<IDataSourceData> 
     {
-
-        const validPreviewExt = DataSourceHelper.getValidPreviewExtensions();
         // Auto determined preview URL for Microsoft Search
-        if (slots[BuiltinTemplateSlots.PreviewUrl] === AutoCalculatedDataSourceFields.AutoPreviewUrl) 
-            {
+        if (slots[BuiltinTemplateSlots.PreviewUrl] === AutoCalculatedDataSourceFields.AutoPreviewUrl) {
+            data.items = data.items.map(item => this.generateItemPreviewUrl(item, slots));
+        }
+        
+        // Auto determined preview image URL (thumbnail)
+        if (slots[BuiltinTemplateSlots.PreviewImageUrl] === AutoCalculatedDataSourceFields.AutoPreviewImageUrl) {
+            const validPreviewExt = DataSourceHelper.getValidPreviewExtensions();
+            data.items = data.items.map(item => this.generateItemThumbnailUrl(item, slots, validPreviewExt));
+        }
 
             data.items = data.items.map(item => {
                 const entityType = this.getEntityType(item);
@@ -850,13 +855,22 @@ export class MicrosoftSearchDataSource extends BaseDataSource<IMicrosoftSearchDa
                         break;
                 }
 
-                return item;
-            });
-        }
-        // Auto determined preview image URL (thumbnail)
-        if (slots[BuiltinTemplateSlots.PreviewImageUrl] === AutoCalculatedDataSourceFields.AutoPreviewImageUrl) {
+        return item;
+    }
 
-            data.items = data.items.map(item => {
+    private generateItemThumbnailUrl(item: any, slots: { [key: string]: string }, validPreviewExt: string[]): any {
+        const contentClass = ObjectHelper.byPath(item, slots.ContentClass);
+
+        if (!isEmpty(contentClass) && (contentClass.toLocaleLowerCase() === "sts_site" || contentClass.toLocaleLowerCase() === "sts_web")) {
+            item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl] = ObjectHelper.byPath(item, "SiteLogo");
+        } else {
+            this.generateThumbnailForNonSiteItem(item, slots, validPreviewExt);
+        }
+
+        // Validate URL is from trusted domain
+        item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl] = DataSourceHelper.validatePreviewImageUrl(
+            item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl]
+        );
 
                 const entityType = this.getEntityType(item);
 
@@ -882,7 +896,35 @@ export class MicrosoftSearchDataSource extends BaseDataSource<IMicrosoftSearchDa
             });
         }
 
-        return data;
+        // Check if required nested properties exist
+        if (!item.resource?.webUrl || !item.resource?.listItem?.fields?.siteId || 
+            !item.resource?.parentReference?.sharepointIds?.listId || 
+            !item.resource?.parentReference?.sharepointIds?.listItemUniqueId) {
+            return;
+        }
+
+        // Extract base URL from resource.webUrl
+        const tenantUrl = item.resource.webUrl.split('/sites/')[0] || item.resource.webUrl.split('/teams/')[0];
+
+        item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl] = DataSourceHelper.generateSharePointThumbnailUrl({
+            baseUrl: tenantUrl,
+            siteId: item.resource.listItem.fields.siteId,
+            webId: webId,
+            listId: item.resource.parentReference.sharepointIds.listId,
+            itemId: item.resource.parentReference.sharepointIds.listItemUniqueId
+        });
+    }
+
+    private generateGraphThumbnail(item: any, siteId: string, itemId: string, slots: { [key: string]: string }): void {
+        const driveId = ObjectHelper.byPath(item, slots[BuiltinTemplateSlots.DriveId]);
+        if (driveId && siteId && itemId) {
+            item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl] = DataSourceHelper.generateGraphThumbnailUrl({
+                baseUrl: this.context.pageContext.site.absoluteUrl,
+                siteId,
+                driveId,
+                itemId
+            });
+        }
     }
 
     private getEntityType(item: any): EntityType | undefined {
@@ -1030,7 +1072,7 @@ export class MicrosoftSearchDataSource extends BaseDataSource<IMicrosoftSearchDa
     private initProperties(): void {
         this.properties.entityTypes = this.properties.entityTypes !== undefined ? this.properties.entityTypes : [EntityType.DriveItem];
 
-    const CommonFields = ["name", "webUrl", "filetype", "createdBy", "createdDateTime", "lastModifiedDateTime", "parentReference", "size", "description", "file", "folder", "subject", "bodyPreview", "replyTo", "from", "sender", "start", "end", "displayName", "givenName", "surname", "userPrincipalName", "mail", "phones", "department","contentTypeId","siteId", "webId", "contentClass", "siteTitle", "sitePath", "AuthorOWSUSER", "listId", "listItemId", "listItemUniqueId", "driveId"];
+    const CommonFields = ["title", "name", "webUrl", "filetype", "fileType", "createdBy", "createdDateTime", "lastModifiedDateTime", "parentReference", "size", "description", "file", "folder", "subject", "bodyPreview", "replyTo", "from", "sender", "start", "end", "displayName", "givenName", "surname", "userPrincipalName", "mail", "phones", "department","contentTypeId","siteId", "webId", "contentClass", "siteTitle", "sitePath", "AuthorOWSUSER", "listId", "listItemId", "listItemUniqueId", "driveId", "owstaxidmetadataalltagsinfo"];
 
         this.properties.fields = this.properties.fields !== undefined ? this.properties.fields : CommonFields;
         this.properties.sortProperties = this.properties.sortProperties !== undefined ? this.properties.sortProperties : [];
@@ -1343,6 +1385,14 @@ export class MicrosoftSearchDataSource extends BaseDataSource<IMicrosoftSearchDa
                                     if (field !== '@odata.type' && !Object.prototype.hasOwnProperty.call(hit, field)) {
                                         hit[field] = hit.resource[field];
                                     }
+                                });
+                            }
+
+                            // Also flatten listItem.fields for driveItem entities backed by SharePoint
+                            const resourceAny = (hit.resource as any);
+                            if (resourceAny.listItem?.fields) {
+                                Object.keys(resourceAny.listItem.fields).forEach(field => {
+                                    hit[field] = resourceAny.listItem.fields[field];
                                 });
                             }
 
