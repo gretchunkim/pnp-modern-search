@@ -308,7 +308,6 @@ export class MicrosoftSearchDataSource extends BaseDataSource<IMicrosoftSearchDa
                 onPropertyChange: this.onCustomPropertyUpdate.bind(this),
                 textDisplayValue: entityTypesDisplayValue.filter(e => e).join(",")
             }),
-            
             new PropertyPaneAsyncCombo('dataSourceProperties.fields', {
                 availableOptions: this._availableFields,
                 allowMultiSelect: true,
@@ -326,13 +325,11 @@ export class MicrosoftSearchDataSource extends BaseDataSource<IMicrosoftSearchDa
             PropertyPaneToggle('dataSourceProperties.enableResultTypes', {
                 label: "Enable result types",
                 disabled: this.properties.entityTypes.indexOf(EntityType.ExternalItem) === -1
-            })
-            ,
+            }),
             PropertyPaneToggle('dataSourceProperties.showSPEmbeddedContent', {
                 label: commonStrings.DataSources.MicrosoftSearch.showSPEmbeddedContentLabel,
                 
-            })
-            ,
+            }),
             PropertyPaneToggle('dataSourceProperties.showMSArchivedContent', {
                 label: commonStrings.DataSources.MicrosoftSearch.showMSArchivedContentLabel,
                 
@@ -591,6 +588,26 @@ export class MicrosoftSearchDataSource extends BaseDataSource<IMicrosoftSearchDa
                 this.properties.enableResultTypes = false;
             }
 
+            // Reset and set appropriate fields for Bookmark, Acronym, or Person
+            const hasBookmark = this.properties.entityTypes.indexOf(EntityType.Bookmark) !== -1;
+            const hasAcronym = this.properties.entityTypes.indexOf(EntityType.Acronym) !== -1;
+            const hasPerson = this.properties.entityTypes.indexOf(EntityType.Person) !== -1;
+            
+            if (hasBookmark && hasAcronym) {
+                // Both Bookmark and Acronym selected - union of both: id, displayName, description, webUrl, categories
+                this.properties.fields = ['id', 'displayName', 'description', 'webUrl', 'categories'];
+            } else if (hasBookmark) {
+                // Bookmark only: id, displayName, description, webUrl, categories
+                this.properties.fields = ['id', 'displayName', 'description', 'webUrl', 'categories'];
+            } else if (hasAcronym) {
+                // Acronym only: displayName, description, webUrl
+                this.properties.fields = ['displayName', 'description', 'webUrl'];
+            } else if (hasPerson) {
+                // Person: all available fields
+                this.properties.fields = ['id', 'displayName', 'givenName', 'surname', 'companyName', 'phones', 'jobTitle', 'department', 'officeLocation', 'additionalOfficeLocation', 'personType', 'userPrincipalName', 'imAddress'];
+            }
+            // If none of the above, leave fields as is
+
             this.context.propertyPane.refresh();
             this.render();
         }
@@ -610,6 +627,105 @@ export class MicrosoftSearchDataSource extends BaseDataSource<IMicrosoftSearchDa
     }
 
     public getTemplateSlots(): ITemplateSlot[] {
+        // Return entity-type-specific slot fields
+        const hasPerson = this.properties.entityTypes.indexOf(EntityType.Person) !== -1;
+        const hasBookmark = this.properties.entityTypes.indexOf(EntityType.Bookmark) !== -1;
+        const hasAcronym = this.properties.entityTypes.indexOf(EntityType.Acronym) !== -1;
+        const hasSharePointTypes = this.properties.entityTypes.some(et => 
+            et === EntityType.ListItem || 
+            et === EntityType.DriveItem || 
+            et === EntityType.Site || 
+            et === EntityType.List ||
+            et === EntityType.Drive ||
+            et === EntityType.ExternalItem
+        );
+
+        // If only Person, Bookmark, or Acronym (no SharePoint types), show specific slots
+        if (!hasSharePointTypes) {
+            // Person entity slots
+            if (hasPerson) {
+                return [
+                    {
+                        slotName: BuiltinTemplateSlots.Title,
+                        slotField: 'displayName'
+                    },
+                    {
+                        slotName: BuiltinTemplateSlots.Summary,
+                        slotField: 'jobTitle'
+                    },
+                    {
+                        slotName: BuiltinTemplateSlots.PreviewUrl,
+                        slotField: 'AutoPreviewUrl'
+                    },
+                    {
+                        slotName: BuiltinTemplateSlots.Id,
+                        slotField: 'id'
+                    },
+                    {
+                        slotName: 'Department',
+                        slotField: 'department'
+                    },
+                    {
+                        slotName: 'Office',
+                        slotField: 'officeLocation'
+                    },
+                    {
+                        slotName: 'Email',
+                        slotField: 'userPrincipalName'
+                    },
+                    {
+                        slotName: 'Phone',
+                        slotField: 'phones'
+                    }
+                ];
+            }
+
+            // Bookmark entity slots
+            if (hasBookmark) {
+                return [
+                    {
+                        slotName: BuiltinTemplateSlots.Title,
+                        slotField: 'displayName'
+                    },
+                    {
+                        slotName: BuiltinTemplateSlots.Summary,
+                        slotField: 'description'
+                    },
+                    {
+                        slotName: BuiltinTemplateSlots.PreviewUrl,
+                        slotField: 'AutoPreviewUrl'
+                    },
+                    {
+                        slotName: BuiltinTemplateSlots.Id,
+                        slotField: 'id'
+                    },
+                    {
+                        slotName: 'Categories',
+                        slotField: 'categories'
+                    }
+                ];
+            }
+
+            // Acronym entity slots
+            if (hasAcronym) {
+                return [
+                    {
+                        slotName: BuiltinTemplateSlots.Title,
+                        slotField: 'displayName'
+                    },
+                    {
+                        slotName: BuiltinTemplateSlots.Summary,
+                        slotField: 'description'
+                    },
+                    {
+                        slotName: BuiltinTemplateSlots.PreviewUrl,
+                        slotField: 'AutoPreviewUrl'
+                    }
+                ];
+            }
+        }
+
+        // Default SharePoint slots (for SharePoint entity types or mixed scenarios)
         return [
             {
                 slotName: BuiltinTemplateSlots.Title,
@@ -703,19 +819,36 @@ export class MicrosoftSearchDataSource extends BaseDataSource<IMicrosoftSearchDa
             {
 
             data.items = data.items.map(item => {
-                const contentTypeId = item.resource.listItem.fields.contentTypeId;
-                const isContainer = DataSourceHelper.isContainerContentType(contentTypeId);
+                const entityType = this.getEntityType(item);
 
-                const webUrl = item.resource.listItem.fields.sitePath;
-                let pathProperty = item[slots[BuiltinTemplateSlots.Path]] || webUrl || item['DefaultEncodingURL'];
-
-                item.AutoPreviewUrl = DataSourceHelper.generatePreviewUrl({
-                    webUrl: webUrl,
-                    uniqueId: item.resource.listItem.id,
-                    fileType: item[slots[BuiltinTemplateSlots.FileType]] || item.resource.listItem.fields.filetype,
-                    pathProperty: pathProperty,
-                    isContainer: isContainer
-                });
+                switch (entityType) {
+                    case EntityType.Message:
+                    case EntityType.TeamsMessage:
+                        this.applyMessagePreviewUrl(item);
+                        break;
+                    case EntityType.Event:
+                        this.applyEventPreviewUrl(item);
+                        break;
+                    case EntityType.Person:
+                        this.applyPersonPreviewUrl(item);
+                        break;
+                    case EntityType.Acronym:
+                        this.applyAcronymPreviewUrl(item);
+                        break;
+                    case EntityType.Bookmark:
+                        this.applyBookmarkPreviewUrl(item);
+                        break;
+                    case EntityType.ListItem:
+                    case EntityType.DriveItem:
+                    case EntityType.Drive:
+                    case EntityType.Site:
+                    case EntityType.List:
+                    case EntityType.ExternalItem:
+                        this.applySharePointPreviewUrl(item, slots);
+                        break;
+                    default:
+                        break;
+                }
 
                 return item;
             });
@@ -725,70 +858,173 @@ export class MicrosoftSearchDataSource extends BaseDataSource<IMicrosoftSearchDa
 
             data.items = data.items.map(item => {
 
-                let contentClass = ObjectHelper.byPath(item, slots.ContentClass);
+                const entityType = this.getEntityType(item);
 
-                if (!isEmpty(contentClass) && (contentClass.toLocaleLowerCase() == "sts_site" || contentClass.toLocaleLowerCase() == "sts_web")) {
-                    item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl] = ObjectHelper.byPath(item, "SiteLogo");
-                }
-                else {
-                    const siteId = ObjectHelper.byPath(item, slots.SiteId);
-                    const webId = ObjectHelper.byPath(item, slots.WebId);
-                    const listId = ObjectHelper.byPath(item, slots.ListId);
-                    const itemId = ObjectHelper.byPath(item, slots.ItemId);
-
-                    const isFolder = ObjectHelper.byPath(item, slots.IsFolder);
-                    const isContainerType = DataSourceHelper.isContainerType(isFolder);
-
-                    // Try thumbnail URL first
-                    let thumbNailUrl = ObjectHelper.byPath(item, "PictureThumbnailURL");
-                    thumbNailUrl = DataSourceHelper.enhanceThumbnailUrl(thumbNailUrl);
-                    
-                    if (thumbNailUrl) {
-                        item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl] = thumbNailUrl;
-                    }
-                    else if (siteId && listId && itemId && !isContainerType) {
-                        // SharePoint item thumbnail
-                        const itemFileType = ObjectHelper.byPath(item, "resource.listItem.fields.filetype");
-                        
-                        if (itemFileType && validPreviewExt.indexOf(itemFileType.toUpperCase()) !== -1) {
-                            // Extract base URL from resource.webUrl
-                            let tenantUrl = item.resource.webUrl.split('/sites/')[0];
-                            if (tenantUrl == null) {
-                                tenantUrl = item.resource.webUrl.split('/teams/')[0];
-                            }
-                            
-                            item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl] = DataSourceHelper.generateSharePointThumbnailUrl({
-                                baseUrl: tenantUrl,
-                                siteId: item.resource.listItem.fields.siteId,
-                                webId: webId,
-                                listId: item.resource.parentReference.sharepointIds.listId,
-                                itemId: item.resource.parentReference.sharepointIds.listItemUniqueId
-                            });
-                        }
-                    } else {
-                        // Graph items logic
-                        const driveId = ObjectHelper.byPath(item, slots[BuiltinTemplateSlots.DriveId]);
-                        if (driveId && siteId && itemId) {
-                            item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl] = DataSourceHelper.generateGraphThumbnailUrl({
-                                baseUrl: this.context.pageContext.site.absoluteUrl,
-                                siteId,
-                                driveId,
-                                itemId
-                            });
-                        }
-                    }
+                switch (entityType) {
+                    case EntityType.Message:
+                    case EntityType.TeamsMessage:
+                    case EntityType.Event:
+                    case EntityType.Person:
+                        return item;
+                    case EntityType.ListItem:
+                    case EntityType.DriveItem:
+                    case EntityType.Drive:
+                    case EntityType.Site:
+                    case EntityType.List:
+                    case EntityType.ExternalItem:
+                        this.applySharePointPreviewImage(item, slots, validPreviewExt);
+                        break;
+                    default:
+                        break;
                 }
 
-                // Validate URL is from trusted domain
-                item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl] = DataSourceHelper.validatePreviewImageUrl(
-                    item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl]
-                );
-                
                 return item;
             });
         }
 
         return data;
+    }
+
+    private getEntityType(item: any): EntityType | undefined {
+        const odataType = item?.resource?.['@odata.type'] as string | undefined;
+        if (!odataType) {
+            return undefined;
+        }
+
+        const normalized = odataType.replace('#microsoft.graph.', '');
+
+        if (normalized === 'search.acronym') {
+            return EntityType.Acronym;
+        }
+
+        if (normalized === 'search.bookmark') {
+            return EntityType.Bookmark;
+        }
+
+        return normalized as EntityType;
+    }
+
+    private applyMessagePreviewUrl(item: any): void {
+        const webLink = ObjectHelper.byPath(item, "resource.webLink");
+        if (webLink) {
+            item.AutoPreviewUrl = webLink;
+        }
+    }
+
+    private applyEventPreviewUrl(item: any): void {
+        const webLink = ObjectHelper.byPath(item, "resource.webLink");
+        if (webLink) {
+            item.AutoPreviewUrl = webLink;
+        }
+    }
+
+    private applyPersonPreviewUrl(item: any): void {
+        const userPrincipalName = ObjectHelper.byPath(item, "resource.userPrincipalName");
+        const mail = ObjectHelper.byPath(item, "resource.mail");
+        const imAddress = ObjectHelper.byPath(item, "resource.imAddress");
+
+        const email = userPrincipalName || mail;
+        if (email) {
+            item.AutoPreviewUrl = `mailto:${email}`;
+            return;
+        }
+
+        if (imAddress) {
+            item.AutoPreviewUrl = imAddress;
+        }
+    }
+
+    private applyAcronymPreviewUrl(item: any): void {
+        const webUrl = ObjectHelper.byPath(item, "resource.webUrl");
+        if (webUrl) {
+            item.AutoPreviewUrl = webUrl;
+        }
+    }
+
+    private applyBookmarkPreviewUrl(item: any): void {
+        const webUrl = ObjectHelper.byPath(item, "resource.webUrl");
+        if (webUrl) {
+            item.AutoPreviewUrl = webUrl;
+        }
+    }
+
+    private applySharePointPreviewUrl(item: any, slots: { [key: string]: string }): void {
+        if (item.resource && item.resource.listItem && item.resource.listItem.fields) {
+            const contentTypeId = item.resource.listItem.fields.contentTypeId;
+            const isContainer = DataSourceHelper.isContainerContentType(contentTypeId);
+
+            const webUrl = item.resource.listItem.fields.sitePath;
+            let pathProperty = item[slots[BuiltinTemplateSlots.Path]] || webUrl || item['DefaultEncodingURL'];
+
+            item.AutoPreviewUrl = DataSourceHelper.generatePreviewUrl({
+                webUrl: webUrl,
+                uniqueId: item.resource.listItem.id,
+                fileType: item[slots[BuiltinTemplateSlots.FileType]] || item.resource.listItem.fields.filetype,
+                pathProperty: pathProperty,
+                isContainer: isContainer
+            });
+        }
+    }
+
+    private applySharePointPreviewImage(item: any, slots: { [key: string]: string }, validPreviewExt: string[]): void {
+        let contentClass = ObjectHelper.byPath(item, slots.ContentClass);
+
+        if (!isEmpty(contentClass) && (contentClass.toLocaleLowerCase() == "sts_site" || contentClass.toLocaleLowerCase() == "sts_web")) {
+            item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl] = ObjectHelper.byPath(item, "SiteLogo");
+        }
+        else {
+            const siteId = ObjectHelper.byPath(item, slots.SiteId);
+            const webId = ObjectHelper.byPath(item, slots.WebId);
+            const listId = ObjectHelper.byPath(item, slots.ListId);
+            const itemId = ObjectHelper.byPath(item, slots.ItemId);
+
+            const isFolder = ObjectHelper.byPath(item, slots.IsFolder);
+            const isContainerType = DataSourceHelper.isContainerType(isFolder);
+
+            // Try thumbnail URL first
+            let thumbNailUrl = ObjectHelper.byPath(item, "PictureThumbnailURL");
+            thumbNailUrl = DataSourceHelper.enhanceThumbnailUrl(thumbNailUrl);
+            
+            if (thumbNailUrl) {
+                item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl] = thumbNailUrl;
+            }
+            else if (siteId && listId && itemId && !isContainerType) {
+                // SharePoint item thumbnail
+                const itemFileType = ObjectHelper.byPath(item, "resource.listItem.fields.filetype");
+                
+                if (itemFileType && validPreviewExt.indexOf(itemFileType.toUpperCase()) !== -1) {
+                    // Extract base URL from resource.webUrl
+                    let tenantUrl = item.resource.webUrl.split('/sites/')[0];
+                    if (tenantUrl == null) {
+                        tenantUrl = item.resource.webUrl.split('/teams/')[0];
+                    }
+                    
+                    item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl] = DataSourceHelper.generateSharePointThumbnailUrl({
+                        baseUrl: tenantUrl,
+                        siteId: item.resource.listItem.fields.siteId,
+                        webId: webId,
+                        listId: item.resource.parentReference.sharepointIds.listId,
+                        itemId: item.resource.parentReference.sharepointIds.listItemUniqueId
+                    });
+                }
+            } else {
+                // Graph items logic
+                const driveId = ObjectHelper.byPath(item, slots[BuiltinTemplateSlots.DriveId]);
+                if (driveId && siteId && itemId) {
+                    item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl] = DataSourceHelper.generateGraphThumbnailUrl({
+                        baseUrl: this.context.pageContext.site.absoluteUrl,
+                        siteId,
+                        driveId,
+                        itemId
+                    });
+                }
+            }
+        }
+
+        // Validate URL is from trusted domain
+        item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl] = DataSourceHelper.validatePreviewImageUrl(
+            item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl]
+        );
     }
 
     private initProperties(): void {
@@ -840,6 +1076,18 @@ export class MicrosoftSearchDataSource extends BaseDataSource<IMicrosoftSearchDa
 
         // Query modification
         let queryTemplate = await this._tokenService.resolveTokens(this.properties.queryTemplate);
+
+        // For Bookmark and Acronym entities, if no input query text but queryTemplate exists, use template as queryString
+        if ((this.properties.entityTypes.indexOf(EntityType.Bookmark) !== -1 || this.properties.entityTypes.indexOf(EntityType.Acronym) !== -1) &&
+            !dataContext.inputQueryText && queryTemplate && queryTemplate.trim()) {
+            queryText = queryTemplate;
+            queryTemplate = ''; // Clear template since we're using it as the search term
+        }
+
+        // People search does not support "*" as a wildcard. Use "?" when only searching for person.
+        if (this.properties.entityTypes.length === 1 && this.properties.entityTypes[0] === EntityType.Person && queryText === '*') {
+            queryText = '?';
+        }
 
         // Paging
         if (dataContext.pageNumber > 1) {
@@ -984,7 +1232,20 @@ export class MicrosoftSearchDataSource extends BaseDataSource<IMicrosoftSearchDa
         }
 
         if (this.properties.fields.length > 0) {
-            searchRequest.fields = this.properties.fields.filter(a => a); // Fix to remove null values
+            // Acronyms and Bookmarks don't support custom field selection
+            // Acronym returns: displayName, description, webUrl
+            // Bookmark returns: id, displayName, description, webUrl, categories
+            let fieldsToUse = this.properties.fields.filter(a => a);
+            
+            if (this.properties.entityTypes.indexOf(EntityType.Acronym) !== -1 || 
+                this.properties.entityTypes.indexOf(EntityType.Bookmark) !== -1) {
+                // Acronyms and Bookmarks don't support custom fields - they return a fixed set of properties
+                fieldsToUse = [];
+            }
+            
+            if (fieldsToUse.length > 0) {
+                searchRequest.fields = fieldsToUse;
+            }
         }
 
         if (aggregations.length > 0) {
@@ -1068,11 +1329,20 @@ export class MicrosoftSearchDataSource extends BaseDataSource<IMicrosoftSearchDa
 
                         const hits = hitContainer.hits.map(hit => {
                             // 'externalItem' will contain resource.properties but 'listItem' will be resource.fields
+                            // For other entity types like bookmark, acronym, person, message, event - flatten root properties from resource
                             const propertiesFieldName = hit.resource.properties ? 'properties' : (hit.resource.fields ? 'fields' : null);
 
                             if (propertiesFieldName) {
                                 Object.keys(hit.resource[propertiesFieldName]).forEach(field => {
                                     hit[field] = hit.resource[propertiesFieldName][field];
+                                });
+                            } else {
+                                // For entity types without properties or fields (bookmark, acronym, person, etc.), 
+                                // flatten root properties from resource directly
+                                Object.keys(hit.resource).forEach(field => {
+                                    if (field !== '@odata.type' && !Object.prototype.hasOwnProperty.call(hit, field)) {
+                                        hit[field] = hit.resource[field];
+                                    }
                                 });
                             }
 
