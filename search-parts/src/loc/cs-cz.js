@@ -416,6 +416,7 @@ define([], function () {
                 CacheDurationLabel: "Doba uložení v mezipaměti (hodiny)",
                 CacheDurationDescription: "Doba v hodinách pro ukládání informací o členství v publiku do mezipaměti"
             },
+            TitleFontDefault: "výchozí",
             TitleStylingGroupName: "Styly nadpisu webové části",
             TitleFont: "Písmo nadpisu",
             TitleFontSize: "Velikost písma nadpisu (px)",

@@ -418,6 +418,7 @@ define([], function () {
                 CacheDurationLabel: "Czas przechowywania w pamięci podręcznej (godziny)",
                 CacheDurationDescription: "Czas w godzinach przechowywania informacji o członkostwie w grupie w pamięci podręcznej"
             },
+            TitleFontDefault: "domyślny",
             TitleStylingGroupName: "Stylizacja tytułu składnika Web Part",
             TitleFont: "Czcionka tytułu",
             TitleFontSize: "Rozmiar czcionki tytułu (px)",

@@ -195,6 +195,7 @@ export abstract class BaseWebPart<T extends IBaseWebPartProps> extends BaseClien
      */
     protected getTitleStylingPropertyPaneGroup(): IPropertyPaneGroup {
         const fontOptions: IPropertyPaneDropdownOption[] = [
+            { key: '', text: commonStrings.PropertyPane.TitleFontDefault },
             { key: '"Segoe UI", "Segoe UI Web (West European)", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif', text: 'Segoe UI' },
             { key: 'Arial, Helvetica, sans-serif', text: 'Arial' },
             { key: '"Times New Roman", Times, serif', text: 'Times New Roman' },
@@ -209,7 +210,7 @@ export abstract class BaseWebPart<T extends IBaseWebPartProps> extends BaseClien
             groupFields: [
                 PropertyPaneDropdown('titleFont', {
                     label: commonStrings.PropertyPane.TitleFont,
-                    selectedKey: this.properties.titleFont || '"Segoe UI", "Segoe UI Web (West European)", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif',
+                    selectedKey: this.properties.titleFont || '',
                     options: fontOptions
                 }),
                 PropertyPaneSlider('titleFontSize', {
@@ -218,7 +219,7 @@ export abstract class BaseWebPart<T extends IBaseWebPartProps> extends BaseClien
                     max: 48,
                     step: 1,
                     showValue: true,
-                    value: this.properties.titleFontSize || 16
+                    value: this.properties.titleFontSize || 20
                 }),
                 PropertyFieldColorPicker('titleFontColor', {
                     label: commonStrings.PropertyPane.TitleFontColor,
@@ -245,7 +246,7 @@ export abstract class BaseWebPart<T extends IBaseWebPartProps> extends BaseClien
      * Resets title styling properties to default values
      */
     protected _resetTitleStylingToDefault(): void {
-        this.properties.titleFont = undefined;
+        this.properties.titleFont = '';
         this.properties.titleFontSize = undefined;
         this.properties.titleFontColor = undefined;
 
