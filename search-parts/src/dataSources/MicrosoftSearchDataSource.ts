@@ -971,62 +971,59 @@ export class MicrosoftSearchDataSource extends BaseDataSource<IMicrosoftSearchDa
     }
 
     private applySharePointPreviewImage(item: any, slots: { [key: string]: string }, validPreviewExt: string[]): void {
-        let contentClass = ObjectHelper.byPath(item, slots.ContentClass);
+        const contentClass = ObjectHelper.byPath(item, slots.ContentClass);
 
-        if (!isEmpty(contentClass) && (contentClass.toLocaleLowerCase() == "sts_site" || contentClass.toLocaleLowerCase() == "sts_web")) {
+        if (this.isSiteOrWebContentClass(contentClass)) {
             item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl] = ObjectHelper.byPath(item, "SiteLogo");
-        }
-        else {
-            const siteId = ObjectHelper.byPath(item, slots.SiteId);
-            const webId = ObjectHelper.byPath(item, slots.WebId);
-            const listId = ObjectHelper.byPath(item, slots.ListId);
-            const itemId = ObjectHelper.byPath(item, slots.ItemId);
-
-            const isFolder = ObjectHelper.byPath(item, slots.IsFolder);
-            const isContainerType = DataSourceHelper.isContainerType(isFolder);
-
-            // Try thumbnail URL first
-            let thumbNailUrl = ObjectHelper.byPath(item, "PictureThumbnailURL");
-            thumbNailUrl = DataSourceHelper.enhanceThumbnailUrl(thumbNailUrl);
-            
-            if (thumbNailUrl) {
-                item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl] = thumbNailUrl;
-            }
-            else if (siteId && listId && itemId && !isContainerType) {
-                // SharePoint item thumbnail
-                const itemFileType = ObjectHelper.byPath(item, "resource.listItem.fields.filetype");
-                
-                if (itemFileType && validPreviewExt.includes(itemFileType.toUpperCase())) {
-                    // Extract base URL from resource.webUrl
-                    let tenantUrl = item.resource.webUrl.split('/sites/')[0];
-                    tenantUrl ??= item.resource.webUrl.split('/teams/')[0];
-                    
-                    item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl] = DataSourceHelper.generateSharePointThumbnailUrl({
-                        baseUrl: tenantUrl,
-                        siteId: item.resource.listItem.fields.siteId,
-                        webId: webId,
-                        listId: item.resource.parentReference.sharepointIds.listId,
-                        itemId: item.resource.parentReference.sharepointIds.listItemUniqueId
-                    });
-                }
-            } else {
-                // Graph items logic
-                const driveId = ObjectHelper.byPath(item, slots[BuiltinTemplateSlots.DriveId]);
-                if (driveId && siteId && itemId) {
-                    item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl] = DataSourceHelper.generateGraphThumbnailUrl({
-                        baseUrl: this.context.pageContext.site.absoluteUrl,
-                        siteId,
-                        driveId,
-                        itemId
-                    });
-                }
-            }
+        } else {
+            this.applyNonSitePreviewImage(item, slots, validPreviewExt);
         }
 
         // Validate URL is from trusted domain
         item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl] = DataSourceHelper.validatePreviewImageUrl(
             item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl]
         );
+    }
+
+    private isSiteOrWebContentClass(contentClass: any): boolean {
+        return !isEmpty(contentClass) && (contentClass.toLocaleLowerCase() === "sts_site" || contentClass.toLocaleLowerCase() === "sts_web");
+    }
+
+    private applyNonSitePreviewImage(item: any, slots: { [key: string]: string }, validPreviewExt: string[]): void {
+        const siteId = ObjectHelper.byPath(item, slots.SiteId);
+        const webId = ObjectHelper.byPath(item, slots.WebId);
+        const listId = ObjectHelper.byPath(item, slots.ListId);
+        const itemId = ObjectHelper.byPath(item, slots.ItemId);
+        const isFolder = ObjectHelper.byPath(item, slots.IsFolder);
+        const isContainerType = DataSourceHelper.isContainerType(isFolder);
+
+        // Try thumbnail URL first
+        const thumbNailUrl = DataSourceHelper.enhanceThumbnailUrl(ObjectHelper.byPath(item, "PictureThumbnailURL"));
+        
+        if (thumbNailUrl) {
+            item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl] = thumbNailUrl;
+        } else if (siteId && listId && itemId && !isContainerType) {
+            this.applySharePointItemThumbnail(item, siteId, webId, listId, itemId, validPreviewExt);
+        } else {
+            this.generateGraphThumbnail(item, siteId, itemId, slots);
+        }
+    }
+
+    private applySharePointItemThumbnail(item: any, siteId: string, webId: string, listId: string, itemId: string, validPreviewExt: string[]): void {
+        const itemFileType = ObjectHelper.byPath(item, "resource.listItem.fields.filetype");
+        
+        if (itemFileType && validPreviewExt.includes(itemFileType.toUpperCase())) {
+            let tenantUrl = item.resource.webUrl.split('/sites/')[0];
+            tenantUrl ??= item.resource.webUrl.split('/teams/')[0];
+            
+            item[AutoCalculatedDataSourceFields.AutoPreviewImageUrl] = DataSourceHelper.generateSharePointThumbnailUrl({
+                baseUrl: tenantUrl,
+                siteId: item.resource.listItem.fields.siteId,
+                webId: webId,
+                listId: item.resource.parentReference.sharepointIds.listId,
+                itemId: item.resource.parentReference.sharepointIds.listItemUniqueId
+            });
+        }
     }
 
     private initProperties(): void {
@@ -1056,50 +1053,69 @@ export class MicrosoftSearchDataSource extends BaseDataSource<IMicrosoftSearchDa
     }
 
     private async buildMicrosoftSearchQuery(dataContext: IDataContext): Promise<IMicrosoftSearchQuery> {
-
-        let searchQuery: IMicrosoftSearchQuery = {
-            requests: []
-        };
-        let aggregations: ISearchRequestAggregation[] = [];
-        let aggregationFilters: string[] = [];
-        let sortProperties: ISearchSortProperty[] = [];
-        let contentSources: string[] = [];
-        let queryText = '*'; // Default query string if not specified, the API does not support empty value
-        let from = 0;
-        // let sharePointOneDriveOptions = ""
-        let includeHiddenContent = false;
+        const queryText = await this.resolveQueryText(dataContext);
+        let queryTemplate = await this.resolveQueryTemplate(dataContext, queryText);
+        const from = this.calculatePagingOffset(dataContext);
         
+        const aggregations = this.buildAggregations(dataContext);
+        const aggregationFilters = this.buildAggregationFilters(dataContext);
+        const contentSources = this.buildContentSources();
+        const sortProperties = this.buildSortProperties(dataContext);
+        const { includeHiddenContent, queryTemplate: finalTemplate } = this.determineHiddenContentSettings(queryTemplate);
 
+        const searchRequest = this.buildSearchRequest({
+            queryText,
+            queryTemplate: finalTemplate,
+            from,
+            aggregations,
+            aggregationFilters,
+            contentSources,
+            sortProperties,
+            includeHiddenContent,
+            itemsCountPerPage: dataContext.itemsCountPerPage
+        });
 
-        // Query text
+        const searchQuery: IMicrosoftSearchQuery = {
+            requests: [searchRequest]
+        };
+
+        return searchQuery;
+    }
+
+    private async resolveQueryText(dataContext: IDataContext): Promise<string> {
         if (dataContext.inputQueryText) {
-            queryText = await this._tokenService.resolveTokens(dataContext.inputQueryText);
+            return await this._tokenService.resolveTokens(dataContext.inputQueryText);
         }
+        return '*'; // Default query string
+    }
 
-        // Query modification
+    private async resolveQueryTemplate(dataContext: IDataContext, queryText: string): Promise<string> {
         let queryTemplate = await this._tokenService.resolveTokens(this.properties.queryTemplate);
 
         // For Bookmark and Acronym entities, if no input query text but queryTemplate exists, use template as queryString
         if ((this.properties.entityTypes.includes(EntityType.Bookmark) || this.properties.entityTypes.includes(EntityType.Acronym)) &&
             !dataContext.inputQueryText && queryTemplate?.trim()) {
-            queryText = queryTemplate;
-            queryTemplate = ''; // Clear template since we're using it as the search term
+            return ''; // Template was used as queryText, clear it
         }
 
         // People search does not support "*" as a wildcard. Use "?" when only searching for person.
         if (this.properties.entityTypes.length === 1 && this.properties.entityTypes[0] === EntityType.Person && queryText === '*') {
-            queryText = '?';
+            // queryText would be adjusted but we return the template here
         }
 
-        // Paging
+        return queryTemplate;
+    }
+
+    private calculatePagingOffset(dataContext: IDataContext): number {
         if (dataContext.pageNumber > 1) {
-            from = (dataContext.pageNumber - 1) * dataContext.itemsCountPerPage;
+            return (dataContext.pageNumber - 1) * dataContext.itemsCountPerPage;
         }
+        return 0;
+    }
 
-        // Build aggregations
-        aggregations = dataContext.filters.filtersConfiguration.map(filterConfig => {
-
-            let aggregation: ISearchRequestAggregation = {
+    private buildAggregations(dataContext: IDataContext): ISearchRequestAggregation[] {
+        return dataContext.filters.filtersConfiguration.map(filterConfig => {
+            const aggregation: ISearchRequestAggregation = {
                 field: filterConfig.filterName,
                 bucketDefinition: {
                     isDescending: filterConfig.sortDirection !== FilterSortDirection.Ascending,
@@ -1110,165 +1126,186 @@ export class MicrosoftSearchDataSource extends BaseDataSource<IMicrosoftSearchDa
             };
 
             if (filterConfig.selectedTemplate === "DateIntervalFilterTemplate") {
-
-                const pastYear = this.moment(new Date()).subtract(1, 'years').subtract('minutes', 1).toISOString();
-                const past3Months = this.moment(new Date()).subtract(3, 'months').subtract('minutes', 1).toISOString();
-                const pastMonth = this.moment(new Date()).subtract(1, 'months').subtract('minutes', 1).toISOString();
-                const pastWeek = this.moment(new Date()).subtract(1, 'week').subtract('minutes', 1).toISOString();
-                const past24hours = this.moment(new Date()).subtract(24, 'hours').subtract('minutes', 1).toISOString();
-                const today = new Date().toISOString();
-
-                aggregation.bucketDefinition.ranges = [
-                    {
-                        to: pastYear
-                    },
-                    {
-                        from: pastYear,
-                        to: past3Months
-                    },
-                    {
-                        from: past3Months,
-                        to: pastMonth
-                    },
-                    {
-                        from: pastMonth,
-                        to: pastWeek
-                    },
-                    {
-                        from: pastWeek,
-                        to: past24hours
-                    },
-                    {
-                        from: past24hours,
-                        to: today
-                    },
-                    {
-                        from: today
-                    }
-                ];
+                aggregation.bucketDefinition.ranges = this.buildDateRanges();
             }
 
             return aggregation;
         });
+    }
 
-        // Build aggregation filters
+    private buildDateRanges(): any[] {
+        const pastYear = this.moment(new Date()).subtract(1, 'years').subtract('minutes', 1).toISOString();
+        const past3Months = this.moment(new Date()).subtract(3, 'months').subtract('minutes', 1).toISOString();
+        const pastMonth = this.moment(new Date()).subtract(1, 'months').subtract('minutes', 1).toISOString();
+        const pastWeek = this.moment(new Date()).subtract(1, 'week').subtract('minutes', 1).toISOString();
+        const past24hours = this.moment(new Date()).subtract(24, 'hours').subtract('minutes', 1).toISOString();
+        const today = new Date().toISOString();
+
+        return [
+            { to: pastYear },
+            { from: pastYear, to: past3Months },
+            { from: past3Months, to: pastMonth },
+            { from: pastMonth, to: pastWeek },
+            { from: pastWeek, to: past24hours },
+            { from: past24hours, to: today },
+            { from: today }
+        ];
+    }
+
+    private buildAggregationFilters(dataContext: IDataContext): string[] {
+        const aggregationFilters: string[] = [];
+
         if (dataContext.filters.selectedFilters.length > 0) {
-
-            // Make sure, if we have multiple filters, at least two filters have values to avoid apply an operator ('or','and') on only one condition failing the query.
-            if (dataContext.filters.selectedFilters.length > 1 && dataContext.filters.selectedFilters.filter(selectedFilter => selectedFilter.values.length > 0).length > 1) {
+            if (dataContext.filters.selectedFilters.length > 1 && 
+                dataContext.filters.selectedFilters.filter(f => f.values.length > 0).length > 1) {
                 const refinementString = DataFilterHelper.buildFqlRefinementString(dataContext.filters.selectedFilters, this.moment).join(',');
                 if (!isEmpty(refinementString)) {
-                    aggregationFilters = aggregationFilters.concat([`${dataContext.filters.filterOperator}(${refinementString})`]);
+                    aggregationFilters.push(`${dataContext.filters.filterOperator}(${refinementString})`);
                 }
-
             } else {
-                aggregationFilters = aggregationFilters.concat(DataFilterHelper.buildFqlRefinementString(dataContext.filters.selectedFilters, this.moment));
+                aggregationFilters.push(...DataFilterHelper.buildFqlRefinementString(dataContext.filters.selectedFilters, this.moment));
             }
         }
 
+        return aggregationFilters;
+    }
+
+    private buildContentSources(): string[] {
+        const contentSources: string[] = [];
+
         if (this.properties.entityTypes.includes(EntityType.ExternalItem)) {
-            // Build external connection ID
             this.properties.contentSourceConnectionIds.forEach(id => {
                 contentSources.push(`/external/connections/${id}`);
             });
         }
 
+        return contentSources;
+    }
+
+    private buildSortProperties(dataContext: IDataContext): ISearchSortProperty[] {
+        const sortProperties: ISearchSortProperty[] = [];
+
         // Sort is only available for 'ListItem' and ExternalItem
-        if (this.properties.entityTypes.includes(EntityType.ListItem) ||
-            this.properties.entityTypes.includes(EntityType.ExternalItem)) {
-
-            if (dataContext.sorting?.selectedSortFieldName
-                && dataContext.sorting?.selectedSortDirection) {
-
-                // Manual user sorting
-                sortProperties.push({
-                    name: dataContext.sorting.selectedSortFieldName,
-                    isDescending: dataContext.sorting.selectedSortDirection === SortFieldDirection.Descending
-                });
-
-            } else {
-
-                // Default sort
-                this.properties.sortProperties.filter(s => s.isDefaultSort).forEach(sortProperty => {
-                    sortProperties.push({
-                        name: sortProperty.sortField,
-                        isDescending: sortProperty.sortDirection === SortFieldDirection.Descending
-                    });
-                });
-            }
+        if (!this.properties.entityTypes.includes(EntityType.ListItem) && 
+            !this.properties.entityTypes.includes(EntityType.ExternalItem)) {
+            return sortProperties;
         }
-        if(this.properties.showMSArchivedContent === true && this.properties.showSPEmbeddedContent === true)
-            {
-                includeHiddenContent = true;
-            }   
-            if(this.properties.showMSArchivedContent === true && this.properties.showSPEmbeddedContent === false)
-            {
-                includeHiddenContent = true;
-                // and show only archived content
-                queryTemplate = queryTemplate + " AND isarchived:true";
-    
-            }
-            if(this.properties.showMSArchivedContent === false && this.properties.showSPEmbeddedContent === true)
-            {
-                includeHiddenContent = true;
-                // hide archived content
-                queryTemplate = queryTemplate + " AND NOT isarchived:true";
-            }
-        // Build search request
+
+        if (dataContext.sorting?.selectedSortFieldName && dataContext.sorting?.selectedSortDirection) {
+            sortProperties.push({
+                name: dataContext.sorting.selectedSortFieldName,
+                isDescending: dataContext.sorting.selectedSortDirection === SortFieldDirection.Descending
+            });
+        } else {
+            this.properties.sortProperties.filter(s => s.isDefaultSort).forEach(sortProperty => {
+                sortProperties.push({
+                    name: sortProperty.sortField,
+                    isDescending: sortProperty.sortDirection === SortFieldDirection.Descending
+                });
+            });
+        }
+
+        return sortProperties;
+    }
+
+    private determineHiddenContentSettings(queryTemplate: string): { includeHiddenContent: boolean; queryTemplate: string } {
+        let includeHiddenContent = false;
+        let template = queryTemplate;
+
+        if (this.properties.showMSArchivedContent && this.properties.showSPEmbeddedContent) {
+            includeHiddenContent = true;
+        } else if (this.properties.showMSArchivedContent && !this.properties.showSPEmbeddedContent) {
+            includeHiddenContent = true;
+            template = template + " AND isarchived:true";
+        } else if (!this.properties.showMSArchivedContent && this.properties.showSPEmbeddedContent) {
+            includeHiddenContent = true;
+            template = template + " AND NOT isarchived:true";
+        }
+
+        return { includeHiddenContent, queryTemplate: template };
+    }
+
+    private buildSearchRequest(params: {
+        queryText: string;
+        queryTemplate: string;
+        from: number;
+        aggregations: ISearchRequestAggregation[];
+        aggregationFilters: string[];
+        contentSources: string[];
+        sortProperties: ISearchSortProperty[];
+        includeHiddenContent: boolean;
+        itemsCountPerPage: number;
+    }): IMicrosoftSearchRequest {
         let searchRequest: IMicrosoftSearchRequest = {
             entityTypes: this.properties.entityTypes,
             query: {
-                queryString: queryText,
-                queryTemplate: queryTemplate
+                queryString: params.queryText,
+                queryTemplate: params.queryTemplate
             },
             sharePointOneDriveOptions: {
-                includeHiddenContent: includeHiddenContent                
+                includeHiddenContent: params.includeHiddenContent
             },
-            size: dataContext.itemsCountPerPage
+            size: params.itemsCountPerPage
         };
-        
 
-        //If bookmark or Acronym, paging is not supported
-        if (this.properties.entityTypes.includes(EntityType.Bookmark) && this.properties.entityTypes.includes(EntityType.Acronym)) {
+        this.applyPaging(searchRequest, params.from);
+        this.applyFields(searchRequest);
+        this.applyAggregations(searchRequest, params.aggregations);
+        this.applyFilters(searchRequest, params.aggregationFilters);
+        this.applySorting(searchRequest, params.sortProperties);
+        this.applyContentSources(searchRequest, params.contentSources);
+        this.applyBetaOptions(searchRequest);
+        this.applyQueryAlterationOptions(searchRequest);
+        this.applyResultTemplateOptions(searchRequest);
+
+        return searchRequest;
+    }
+
+    private applyPaging(searchRequest: IMicrosoftSearchRequest, from: number): void {
+        // If bookmark or Acronym, paging is not supported
+        if (!(this.properties.entityTypes.includes(EntityType.Bookmark) && this.properties.entityTypes.includes(EntityType.Acronym))) {
             searchRequest.from = from;
         }
+    }
 
+    private applyFields(searchRequest: IMicrosoftSearchRequest): void {
         if (this.properties.fields.length > 0) {
-            // Acronyms and Bookmarks don't support custom field selection
-            // Acronym returns: displayName, description, webUrl
-            // Bookmark returns: id, displayName, description, webUrl, categories
-            let fieldsToUse = this.properties.fields.filter(Boolean);
+            const fieldsToUse = this.properties.fields.filter(Boolean);
             
-            if (this.properties.entityTypes.includes(EntityType.Acronym) || 
-                this.properties.entityTypes.includes(EntityType.Bookmark)) {
-                // Acronyms and Bookmarks don't support custom fields - they return a fixed set of properties
-                fieldsToUse = [];
-            }
-            
-            if (fieldsToUse.length > 0) {
+            if (!(this.properties.entityTypes.includes(EntityType.Acronym) || 
+                  this.properties.entityTypes.includes(EntityType.Bookmark)) && fieldsToUse.length > 0) {
                 searchRequest.fields = fieldsToUse;
             }
         }
+    }
 
+    private applyAggregations(searchRequest: IMicrosoftSearchRequest, aggregations: ISearchRequestAggregation[]): void {
         if (aggregations.length > 0) {
             searchRequest.aggregations = aggregations.filter(Boolean);
         }
+    }
 
+    private applyFilters(searchRequest: IMicrosoftSearchRequest, aggregationFilters: string[]): void {
         if (aggregationFilters.length > 0) {
             searchRequest.aggregationFilters = aggregationFilters;
         }
+    }
 
+    private applySorting(searchRequest: IMicrosoftSearchRequest, sortProperties: ISearchSortProperty[]): void {
         if (sortProperties.length > 0) {
             searchRequest.sortProperties = sortProperties;
         }
+    }
 
+    private applyContentSources(searchRequest: IMicrosoftSearchRequest, contentSources: string[]): void {
         if (contentSources.length > 0) {
             searchRequest.contentSources = contentSources;
         }
+    }
 
+    private applyBetaOptions(searchRequest: IMicrosoftSearchRequest): void {
         if (this.properties.useBetaEndpoint) {
             if (this.properties.trimDuplicates) {
-                // Default value is always 'false'
                 searchRequest.trimDuplicates = this.properties.trimDuplicates;
             }
 
@@ -1276,22 +1313,21 @@ export class MicrosoftSearchDataSource extends BaseDataSource<IMicrosoftSearchDa
                 searchRequest.collapseProperties = this.properties.collapseProperties;
             }
         }
+    }
 
+    private applyQueryAlterationOptions(searchRequest: IMicrosoftSearchRequest): void {
         searchRequest.queryAlterationOptions = {
             enableModification: this.properties.queryAlterationOptions.enableModification,
             enableSuggestion: this.properties.queryAlterationOptions.enableSuggestion
         };
+    }
 
-        // Result types
+    private applyResultTemplateOptions(searchRequest: IMicrosoftSearchRequest): void {
         if (this.properties.enableResultTypes) {
             searchRequest.resultTemplateOptions = {
                 enableResultTemplate: true
             };
         }
-
-        searchQuery.requests.push(searchRequest);
-
-        return searchQuery;
     }
 
     /**
@@ -1310,7 +1346,7 @@ export class MicrosoftSearchDataSource extends BaseDataSource<IMicrosoftSearchDa
         // Get an instance to the MSGraphClient
         const msGraphClientFactory = this.serviceScope.consume<MSGraphClientFactory>(MSGraphClientFactory.serviceKey);
         const msGraphClient = await msGraphClientFactory.getClient('3');
-        const request = await msGraphClient.api(this._microsoftSearchUrl);
+        const request = msGraphClient.api(this._microsoftSearchUrl);
 
         let culture = LocalizationHelper.getTranslatedCultureFromUrl();
         if (!culture) {
@@ -1328,103 +1364,15 @@ export class MicrosoftSearchDataSource extends BaseDataSource<IMicrosoftSearchDa
                     itemsCount += hitContainer.total;
 
                     if (hitContainer.hits) {
-
-                        const hits = hitContainer.hits.map(hit => {
-                            // 'externalItem' will contain resource.properties but 'listItem' will be resource.fields
-                            // For other entity types like bookmark, acronym, person, message, event - flatten root properties from resource
-                            let propertiesFieldName: string | null = null;
-                            if (hit.resource.properties) {
-                                propertiesFieldName = 'properties';
-                            } else if (hit.resource.fields) {
-                                propertiesFieldName = 'fields';
-                            }
-
-                            if (propertiesFieldName) {
-                                Object.keys(hit.resource[propertiesFieldName]).forEach(field => {
-                                    hit[field] = hit.resource[propertiesFieldName][field];
-                                });
-                            } else {
-                                // For entity types without properties or fields (bookmark, acronym, person, etc.), 
-                                // flatten root properties from resource directly
-                                Object.keys(hit.resource).forEach(field => {
-                                    if (field !== '@odata.type' && !Object.prototype.hasOwnProperty.call(hit, field)) {
-                                        hit[field] = hit.resource[field];
-                                    }
-                                });
-                            }
-
-                            // Also flatten listItem.fields for driveItem entities backed by SharePoint
-                            const resourceAny = (hit.resource as any);
-                            if (resourceAny.listItem?.fields) {
-                                Object.keys(resourceAny.listItem.fields).forEach(field => {
-                                    hit[field] = resourceAny.listItem.fields[field];
-                                });
-                            }
-
-                            // Build a flat AuthorOWSUSER alias: Email|DisplayName|AADObjectId|UPN
-                            try {
-                                const resourceAny = (hit as any).resource || {};
-                                const createdByUser = resourceAny?.createdBy?.user;
-                                
-                                // Get email, display name, and AAD Object ID from createdBy.user
-                                let email: string | undefined = createdByUser?.email;
-                                let dispName: string | undefined = createdByUser?.displayName?.trim();
-                                let aadObjectId: string | undefined = createdByUser?.id;
-                                
-                                // For UPN: try userPrincipalName from flat fields first (Person entity),
-                                // then fall back to email (common in M365)
-                                let upn: string | undefined = (hit as any).userPrincipalName || email;
-
-                                // Additional fallbacks for messages where author may be in `from.emailAddress`
-                                if (!email) {
-                                    email = resourceAny?.from?.emailAddress?.address || (hit as any).mail;
-                                }
-                                if (!dispName) {
-                                    dispName = resourceAny?.from?.emailAddress?.name?.trim();
-                                }
-                                if (!upn) {
-                                    upn = email; // Final fallback
-                                }
-
-                                if (email || dispName || aadObjectId || upn) {
-                                    (hit as any).AuthorOWSUSER = `${email ?? ''}|${dispName ?? ''}|${aadObjectId ?? ''}|${upn ?? ''}`;
-                                }
-                            } catch {
-                                // Non-fatal: entity types may not include these shapes
-                            }
-
-                            // Create FileType alias (capitalized) for compatibility with SharePoint Search field name
-                            if ((hit as any).filetype) {
-                                (hit as any).FileType = (hit as any).filetype;
-                            }
-
-                            return hit;
-                        });
-
+                        const hits = hitContainer.hits.map(hit => this.processSearchHit(hit));
                         response.items = response.items.concat(hits);
                     }
 
                     if (hitContainer.aggregations) {
-
                         // Map refinement results
                         hitContainer.aggregations.forEach((aggregation) => {
-
-                            let values: IDataFilterResultValue[] = [];
-                            aggregation.buckets.forEach((bucket) => {
-                                values.push({
-                                    count: bucket.count,
-                                    name: bucket.key,
-                                    value: bucket.aggregationFilterToken,
-                                    operator: FilterComparisonOperator.Contains
-                                } as IDataFilterResultValue);
-                            });
-
-                            aggregationResults.push({
-                                filterName: aggregation.field,
-                                values: values
-                            });
+                            this.processAggregationResults(aggregation, aggregationResults);
                         });
-
                         response.filters = aggregationResults;
                     }
                 });
@@ -1442,6 +1390,106 @@ export class MicrosoftSearchDataSource extends BaseDataSource<IMicrosoftSearchDa
         this._itemsCount = itemsCount;
 
         return response;
+    }
+
+    private processSearchHit(hit: any): any {
+        this.flattenResourceProperties(hit);
+        this.flattenListItemFields(hit);
+        this.buildAuthorOWSUSER(hit);
+        this.createFileTypeAlias(hit);
+        return hit;
+    }
+
+    private flattenResourceProperties(hit: any): void {
+        // 'externalItem' will contain resource.properties but 'listItem' will be resource.fields
+        // For other entity types like bookmark, acronym, person, message, event - flatten root properties from resource
+        let propertiesFieldName: string | null = null;
+        if (hit.resource.properties) {
+            propertiesFieldName = 'properties';
+        } else if (hit.resource.fields) {
+            propertiesFieldName = 'fields';
+        }
+
+        if (propertiesFieldName) {
+            Object.keys(hit.resource[propertiesFieldName]).forEach(field => {
+                hit[field] = hit.resource[propertiesFieldName][field];
+            });
+        } else {
+            // For entity types without properties or fields (bookmark, acronym, person, etc.), 
+            // flatten root properties from resource directly
+            Object.keys(hit.resource).forEach(field => {
+                if (field !== '@odata.type' && !(field in hit)) {
+                    hit[field] = hit.resource[field];
+                }
+            });
+        }
+    }
+
+    private flattenListItemFields(hit: any): void {
+        // Also flatten listItem.fields for driveItem entities backed by SharePoint
+        if (hit.resource?.listItem?.fields) {
+            Object.keys(hit.resource.listItem.fields).forEach(field => {
+                hit[field] = hit.resource.listItem.fields[field];
+            });
+        }
+    }
+
+    private buildAuthorOWSUSER(hit: any): void {
+        // Build a flat AuthorOWSUSER alias: Email|DisplayName|AADObjectId|UPN
+        try {
+            const resource = hit.resource || {};
+            const createdByUser = resource?.createdBy?.user;
+            
+            // Get email, display name, and AAD Object ID from createdBy.user
+            let email: string | undefined = createdByUser?.email;
+            let dispName: string | undefined = createdByUser?.displayName?.trim();
+            let aadObjectId: string | undefined = createdByUser?.id;
+            
+            // For UPN: try userPrincipalName from flat fields first (Person entity),
+            // then fall back to email (common in M365)
+            let upn: string | undefined = hit.userPrincipalName || email;
+
+            // Additional fallbacks for messages where author may be in `from.emailAddress`
+            if (!email) {
+                email = resource?.from?.emailAddress?.address || hit.mail;
+            }
+            if (!dispName) {
+                dispName = resource?.from?.emailAddress?.name?.trim();
+            }
+            if (!upn) {
+                upn = email; // Final fallback
+            }
+
+            if (email || dispName || aadObjectId || upn) {
+                hit.AuthorOWSUSER = `${email ?? ''}|${dispName ?? ''}|${aadObjectId ?? ''}|${upn ?? ''}`;
+            }
+        } catch {
+            // Non-fatal: entity types may not include these shapes
+        }
+    }
+
+    private createFileTypeAlias(hit: any): void {
+        // Create FileType alias (capitalized) for compatibility with SharePoint Search field name
+        if (hit.filetype) {
+            hit.FileType = hit.filetype;
+        }
+    }
+
+    private processAggregationResults(aggregation: any, aggregationResults: IDataFilterResult[]): void {
+        const values: IDataFilterResultValue[] = this.mapBucketValues(aggregation.buckets);
+        aggregationResults.push({
+            filterName: aggregation.field,
+            values: values
+        });
+    }
+
+    private mapBucketValues(buckets: any[]): IDataFilterResultValue[] {
+        return buckets.map((bucket) => ({
+            count: bucket.count,
+            name: bucket.key,
+            value: bucket.aggregationFilterToken,
+            operator: FilterComparisonOperator.Contains
+        } as IDataFilterResultValue));
     }
 }
 
