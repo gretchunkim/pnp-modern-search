@@ -417,6 +417,7 @@ define([], function () {
                 CacheDurationLabel: "Cache-varighed (timer)",
                 CacheDurationDescription: "Varighed i timer for caching af målgruppemedlemskab"
             },
+            TitleFontDefault: "standard",
             TitleStylingGroupName: "Webdel titelstyling",
             TitleFont: "Titelskrifttype",
             TitleFontSize: "Titelskriftstørrelse (px)",

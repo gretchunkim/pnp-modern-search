@@ -417,6 +417,7 @@ declare interface ICommonStrings {
         CacheDurationLabel: string;
         CacheDurationDescription: string;
       },
+      TitleFontDefault: string;
       TitleStylingGroupName: string;
       TitleFont: string;
       TitleFontSize: string;

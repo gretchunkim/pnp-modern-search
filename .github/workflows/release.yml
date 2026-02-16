@@ -55,10 +55,18 @@ jobs:
             - name: Build SPFx
               run: |
                   pnpm install
-                  gulp update-version --value $GITVERSION_MAJORMINORPATCH
-                  gulp update-package-name --name pnp-modern-search-parts-$GITVERSION_SEMVER
-                  gulp bundle --ship
-                  gulp package-solution --ship
+                  # Detect build system: heft for SPFx 1.22+, gulp for earlier
+                  if [ -f "config/rig.json" ]; then
+                    echo "Using heft-based build (SPFx 1.22+)"
+                    npx heft build --production
+                    npx heft package-solution --production
+                  else
+                    echo "Using gulp-based build (SPFx 1.21-)"
+                    gulp update-version --value $GITVERSION_MAJORMINORPATCH
+                    gulp update-package-name --name pnp-modern-search-parts-$GITVERSION_SEMVER
+                    gulp bundle --ship
+                    gulp package-solution --ship
+                  fi
 
             - name: Upload artifact
               uses: actions/upload-artifact@v4

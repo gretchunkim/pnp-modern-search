@@ -418,6 +418,7 @@ define([], function () {
                 CacheDurationLabel: "Cachelängd (timmar)",
                 CacheDurationDescription: "Tid i timmar för cachelagring av målgruppsmedlemskap"
             },
+            TitleFontDefault: "standard",
             TitleStylingGroupName: "Webbdelstitelstyling",
             TitleFont: "Titeltypsnitt",
             TitleFontSize: "Titeltypsnittsstorlek (px)",

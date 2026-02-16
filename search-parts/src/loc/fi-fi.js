@@ -415,6 +415,7 @@ define([], function () {
                 CacheDurationLabel: "Välimuistin kesto (tuntia)",
                 CacheDurationDescription: "Aika tunteina kohderyhmän jäsenyyden välimuistiin tallentamiseksi"
             },
+            TitleFontDefault: "oletus",
             TitleStylingGroupName: "Web-osan otsikon muotoilu",
             TitleFont: "Otsikon fontti",
             TitleFontSize: "Otsikon fonttikoko (px)",
