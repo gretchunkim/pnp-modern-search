@@ -82,6 +82,22 @@ export class FilterDateRangeComponent extends React.Component<IFilterDateRangeCo
             return customStyles;
         };
 
+        const calloutProps = {
+            setInitialFocus: false,
+            popupProps: {
+                onRestoreFocus: (params) => {
+                    const originalElement = params && params.originalElement;
+                    if (originalElement && (originalElement as HTMLElement).focus) {
+                        try {
+                            (originalElement as HTMLElement).focus({ preventScroll: true });
+                        } catch {
+                            (originalElement as HTMLElement).focus();
+                        }
+                    }
+                }
+            }
+        };
+
         const fromProps: IDatePickerProps = {
             placeholder: strings.General.DateFromLabel,
             onSelectDate: this._updateFromDate,
@@ -92,7 +108,8 @@ export class FilterDateRangeComponent extends React.Component<IFilterDateRangeCo
             theme: this.props.themeVariant as ITheme,
             strings: strings.General.DatePickerStrings,
             formatDate: this._onFormatDate,
-            allowTextInput: true
+            allowTextInput: true,
+            calloutProps: calloutProps
         };
 
         let toProps: IDatePickerProps = {
@@ -105,7 +122,8 @@ export class FilterDateRangeComponent extends React.Component<IFilterDateRangeCo
             borderless: true,
             strings: strings.General.DatePickerStrings,
             formatDate: this._onFormatDate,
-            allowTextInput: true
+            allowTextInput: true,
+            calloutProps: calloutProps
         };
 
         if (this.state.selectedFromDate) {
